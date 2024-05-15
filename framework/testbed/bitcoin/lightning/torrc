@@ -1,0 +1,32 @@
+## The directory for keeping all the keys/etc
+DataDirectory /var/lib/tor
+
+# put 0.0.0.0: before the port number to open to extern access and setup the password below
+## Tor opens a socks proxy on port 9050
+SocksPort 9050
+
+## Tor opens a control port on 9051
+ControlPort 9051
+
+## Entry policies to allow/deny SOCKS requests based on IP address.
+SocksPolicy accept *
+
+## Logs go to stdout at level "notice"
+Log notice stdout
+
+# Try for at most NUM seconds when building circuits. If the circuit isn't open in that time, give up on it. (Default: 1 minute.)
+CircuitBuildTimeout 5
+# Send a padding cell every N seconds to keep firewalls from closing our connections while Tor is not in use.
+KeepalivePeriod 60
+# Force Tor to consider whether to build a new circuit every NUM seconds.
+NewCircuitPeriod 15
+# How many entry guards should we keep at a time?
+NumEntryGuards 8
+# pass is torpedo in case you want to open this externally, run tor with --hash-password "<content_below>"
+#HashedControlPassword 16:C3D50E956FE1F3C66046CA2DF99AB89A483737A28CBC129859423369F7
+Log notice file /var/log/tor/notice.txt
+
+HiddenServiceDir /var/lib/tor/lightningd-service_v3/
+HiddenServiceVersion 3
+HiddenServicePort 1234 127.0.0.1:9735
+

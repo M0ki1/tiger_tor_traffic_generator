@@ -1,0 +1,201 @@
+---
+
+- name: Global variables for all tags
+  hosts: all
+  tasks:
+    - set_fact:
+        target_vm_folder: "/home/torpedo/webapp"
+        webapp_api_image: "aragon2210/torpedo-api"
+        webapp_api_version: "1.0"
+        webapp_frontend_image: "aragon2210/torpedo-nginx"
+        webapp_frontend_version: "1.0"
+        webapp_db_image: "aragon2210/torpedo-db"
+        webapp_db_version: "1.0"
+      tags: 
+        - build_images
+        - complete_setup
+        - database_setup
+        - api_setup
+        - nginx_setup
+        - create_network
+        - stop_database
+        - stop_api
+        - stop_nginx
+        - stop_all_containers
+        - remove_database_image
+        - remove_api_image
+        - remove_nginx_image
+        - remove_all_images
+        - remove_network
+
+#only when running all containers on local machine
+- hosts: local
+  gather_facts: no
+
+  tasks:
+    - name: Remove network
+      shell: docker network rm tp-network
+
+      ignore_errors: yes
+      tags: 
+        - complete_setup
+        
+    - name: Create network
+      shell: docker network create tp-network
+
+      ignore_errors: yes
+      tags: 
+        - complete_setup
+        - create_network
+
+- hosts: database
+  gather_facts: no
+ 
+  tasks:
+    - name: Build database docker image
+      shell: docker build --no-cache -t torpedo-db ../database
+      tags: 
+        - build_images
+
+    - name: Stop database docker container
+      become: no
+      shell: | 
+        docker stop torpedo_db && docker container rm torpedo_db
+
+      ignore_errors: yes 
+      tags: 
+        - complete_setup
+        - stop_database
+        - stop_all_containers
+        - remove_database_image
+        - remove_all_images
+
+    - name: Pull database docker image
+      shell: docker pull {{ webapp_db_image }}:{{ webapp_db_version }}
+      tags:
+        - complete_setup
+        - database_setup
+
+    - name: Run database docker container
+      shell: |
+        docker run -d --network="tp-network" -p 5432:5432 --name torpedo_db {{ webapp_db_image }}:{{ webapp_db_version }}
+      tags: 
+        - complete_setup
+        - database_setup
+
+    - name: Remove database docker image
+      become: no
+      shell: | 
+        docker rmi torpedo-db
+
+      ignore_errors: yes
+      tags: 
+        - remove_database_image
+        - remove_all_images
+
+
+- hosts: api
+  gather_facts: no
+
+  tasks:
+    - name: Build api docker image
+      shell: docker build --no-cache -t torpedo-api ../backend
+      register: build_api_image
+
+      tags:
+        - build_images
+
+    - name: Stop api docker container
+      become: no
+      shell: | 
+        docker stop torpedo_api && docker container rm torpedo_api
+
+      ignore_errors: yes
+      tags: 
+        - complete_setup
+        - stop_api
+        - stop_all_containers
+        - remove_api_image
+        - remove_all_images
+
+    - name: Pull api docker image
+      shell: docker pull {{ webapp_api_image }}:{{ webapp_api_version }}
+      tags:
+        - complete_setup
+        - api_setup
+
+    - name: Run api docker container
+      shell: |
+        docker run -d --network="tp-network" -p 4000:4000 --name torpedo_api {{ webapp_api_image }}:{{ webapp_api_version }}
+      tags:
+        - complete_setup
+        - api_setup
+    
+    - name: Remove api docker image
+      become: no
+      shell: | 
+        docker rmi torpedo-api
+
+      ignore_errors: yes
+      tags: 
+        - remove_api_image
+        - remove_all_images
+
+
+- hosts: nginx
+  gather_facts: no
+  
+  tasks:
+    - name: Build nginx docker image
+      shell: docker build --no-cache -t torpedo-nginx ../frontend
+      tags: 
+        - build_images
+
+    - name: Stop nginx docker container
+      become: no
+      shell: | 
+        docker stop torpedo_nginx && docker container rm torpedo_nginx
+
+      ignore_errors: yes
+      tags: 
+        - complete_setup
+        - stop_all_containers
+        - stop_nginx
+        - remove_nginx_image
+        - remove_all_images
+
+    - name: Pull nginx docker image
+      shell: docker pull {{ webapp_frontend_image }}:{{ webapp_frontend_version }}
+      tags:
+        - complete_setup
+        - nginx_setup
+
+    - name: Run nginx docker container
+      shell: |
+        docker run -d --network="tp-network" -p 80:80 --name torpedo_nginx {{ webapp_frontend_image }}:{{ webapp_frontend_version }}
+      tags: 
+        - complete_setup
+        - nginx_setup
+
+    - name: Remove nginx docker image
+      become: no
+      shell: | 
+        docker rmi torpedo-nginx
+
+      ignore_errors: yes
+      tags:
+        - remove_nginx_image
+        - remove_all_images
+
+#only when running all containers on local machine
+- hosts: local
+  gather_facts: no
+
+  tasks:
+    - name: Remove network
+      shell: docker network rm tp-network
+
+      ignore_errors: yes
+      tags: 
+        - remove_all_images
+        - remove_network

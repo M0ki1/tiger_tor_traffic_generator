@@ -1,0 +1,76 @@
+#!/bin/bash
+#Run python script
+echo "nOnions: $1"
+echo "Number of requests: $2"
+echo "Client ID: $3"
+echo "Clients per node: {{ clients_per_node }}"
+#### now done by ansible
+# docker network rm clients                              # should produce an error (network does not exist)
+# docker network create --subnet 172.19.0.0/16 clients   # attach with: --net clients --ip 172.19.0.X
+####
+# launch the clients
+
+docker pull {{ client_target_docker_img }}
+
+DOCKER_IP=$(docker inspect -f "{% raw %}{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}{% endraw %}" target)
+#DOCKER_IP=$(docker network inspect clients -f "{% raw %}{{ range.Containers }}{{ .IPv4Address }}{{ end }}{% endraw %}")
+
+if [ {{ use_bridge }} = "1" ]
+then
+  mv userpoint_.sh userpoint.sh
+  touch USE_OBFS4_BRIDGE
+  chmod +x userpoint.sh
+fi
+
+for i in $(seq {{ clients_per_node }})
+do
+  PORT1=$((9050 + $i * 2))
+  PORT2=$((9050 + $i * 2 + 1))
+  CLIENT_IP1=$((10 + $i))
+  CLIENT_IP=$(echo $DOCKER_IP | sed -e "s/\(.*\.\)\(2\).*/\1${CLIENT_IP1}/")
+  echo " ==== START tor_client${i}: ${CLIENT_IP} (tor port ${PORT1}) ==== "
+  docker run --rm -it --cap-add=NET_ADMIN --cap-add=NET_RAW --log-opt max-size=5m --log-opt max-file=5 --net clients --ip $CLIENT_IP -p ${PORT1}:9050 -p ${PORT2}:9051 -e PASSWORD=emptyPassword --volumes-from target -d -h "{{ inventory_hostname }}-client$i" --name tor_client$i {{ client_target_docker_img }} /bin/bash
+  docker exec tor_client$i cp /app/torrc /etc/tor/torrc
+  docker exec tor_client$i chown -R root /var/lib/tor
+  docker exec tor_client$i sh -c "tor 1> screenlog_client$i  &"
+done
+
+wait
+sleep 10s
+
+echo "" > kill_experiment.sh
+for i in $(seq {{ clients_per_node }})
+do
+  # TODO: job_collection_job_manager.yml does not send cliend_id in $3
+  echo "python3 experiment_scale_tor_simulate_user_torBrowser.py $1 $2 $i"
+  if [[ "{{ is_attacker }}" == "1" && "$i" == "1" ]] ; then # only 1 attacker per VM
+    docker exec tor_client$i sh -c "python3 experiment_scale_tor_simulate_user_torBrowser.py $1 $2 $i --attacker 1> screenlog_client$i &"
+  else 
+    docker exec tor_client$i sh -c "python3 experiment_scale_tor_simulate_user_torBrowser.py $1 $2 $i 1> screenlog_client$i &"
+  fi
+  echo "kill $!" >> kill_experiment.sh
+done
+
+echo "echo \"done\"" >> kill_experiment.sh
+sleep 10s
+
+for i in $(seq {{ clients_per_node }})
+do
+  docker exec tor_client$i wait
+  while [ ! -f client${i}_is_done ]
+  do
+    sleep 1s
+  done
+done
+
+wait
+
+rm kill_experiment.sh
+python3 experiment_tor_signal_termination.py
+
+for i in $(seq {{ clients_per_node }})
+do
+  echo " ==== STOP tor_client${i} ==== "
+  docker stop tor_client$i
+done
+echo "finished"

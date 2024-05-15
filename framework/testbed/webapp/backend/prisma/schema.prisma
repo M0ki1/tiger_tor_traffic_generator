@@ -1,0 +1,65 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Type {
+  SERVICE
+  CLIENT
+}
+
+model User {
+  id           Int                @id @default(autoincrement())
+  name         String             @db.VarChar(255)
+  email        String             @unique @db.VarChar(255)
+  password     String             @db.VarChar(255)
+}
+
+model Flow {
+  id           Int                @id @default(autoincrement())
+  csNodeIp     String             @db.VarChar(255)
+  entryNodeIp  String             @db.VarChar(255)
+  type         Type
+  isCorrelated Boolean            @default(false)
+  packets      Packet[]           @relation("FlowToPacket")
+
+  //one to many
+  clientCorr   FlowCorrelation[]   @relation("ClientFlow")//only if is client
+  //one to many
+  serviceCorr  FlowCorrelation[]   @relation("ServiceFlow")//only if is service
+}
+
+model Packet {
+  id           Int                @id @default(autoincrement())
+                 
+  timestamp    Int
+  size         Int 
+
+  sourceIp     String             @db.VarChar(255)
+  sourcePort   Int
+  
+  destIp       String             @db.VarChar(255)
+  destPort     Int
+
+  flow         Flow               @relation("FlowToPacket", fields: [flowId], references: [id])
+  flowId       Int
+}
+
+model FlowCorrelation {
+  id           Int                @id @default(autoincrement())
+
+  //many to one
+  clientFlow   Flow               @relation("ClientFlow", fields: [clFlowId], references: [id])
+  clFlowId     Int                
+
+  //many to one
+  serviceFlow  Flow               @relation("ServiceFlow", fields: [srvFlowId], references: [id])
+  srvFlowId    Int                
+}

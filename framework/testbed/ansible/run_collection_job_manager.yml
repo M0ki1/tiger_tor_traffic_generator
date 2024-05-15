@@ -1,0 +1,561 @@
+---
+- name: Global variables for all tags
+  hosts: all
+  tasks:
+    - set_fact:
+        target_vm_folder: "{{=== T_VM_HOME_FOLDER ===}}"
+        os_target_docker_img: "dcastro93/dpss:danon_os"
+        client_target_docker_img: "dcastro93/dpss:danon_client"
+        # client_tor_docker_img: "dcastro93/dpss:tor_client"
+        job_coordinator_target_docker_img: "dcastro93/dpss:danon_job_manager"
+      tags: 
+        - config_exp
+        - setup_onion
+        - upload_real_onion_pages
+        - build_docker_tor_onion_service
+        - launch_os
+        - launch_capture
+        - start_capture
+        - bridge_line
+        - run_exp
+        - kill_exp
+        - kill_containers
+        - fetch_pcaps_onion
+        - fetch_pcaps_onion_full
+        - fetch_pcaps_client
+        - fetch_inc_log
+        - post_exp
+        - rm_pcaps
+        - rm_onion_pcaps
+        - rm_client_pcaps
+
+- hosts: os_nodes
+  gather_facts: no
+  any_errors_fatal: true
+ 
+  tasks:
+    - name: Prepare hidden-service-docker-image into the machines
+      delegate_to: localhost
+      # TODO
+      # scp -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /app/hidden-service-docker-image/onion_addresses_v3/node$(( ({{ node_index }} - 1) * 4 + $i))/hostname {{ ansible_user }}@{{ ansible_host }}:"{{ target_vm_folder }}/hidden-service-docker-image/web-${i}/" 1>/dev/null
+      #scp -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /app/hidden-service-docker-image/onion_addresses_v3/node$(( ({{ node_index }} - 1) * 4 + $i))/hs_ed25519_public_key {{ ansible_user }}@{{ ansible_host }}:"{{ target_vm_folder }}/hidden-service-docker-image/web-${i}/"  1>/dev/null
+      #scp -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /app/hidden-service-docker-image/onion_addresses_v3/node$(( ({{ node_index }} - 1) * 4 + $i))/hs_ed25519_secret_key {{ ansible_user }}@{{ ansible_host }}:"{{ target_vm_folder }}/hidden-service-docker-image/web-${i}/"  1>/dev/null
+      shell: |
+        rsync -azP -e "ssh -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" "./hidden-service-docker-image" {{ ansible_user }}@{{ ansible_host }}:"{{ target_vm_folder }}/" 1>/dev/null 
+        for i in $(echo "{{ item }}" | tr -d '[],')
+        do
+          ssh -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ ansible_user }}@{{ ansible_host }} "mkdir -p {{ target_vm_folder }}/hidden-service-docker-image/web-${i}"
+          ssh -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ ansible_user }}@{{ ansible_host }} "cp -r {{ target_vm_folder }}/hidden-service-docker-image/web/* {{ target_vm_folder }}/hidden-service-docker-image/web-${i}/"
+          scp -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /app/hidden-service-docker-image/onion_addresses_v3/node$(( ({{ node_index }} - 1) * {{ onions_per_node }} + $i))/hostname {{ ansible_user }}@{{ ansible_host }}:"{{ target_vm_folder }}/hidden-service-docker-image/web-${i}/" 1>/dev/null
+          scp -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /app/hidden-service-docker-image/onion_addresses_v3/node$(( ({{ node_index }} - 1) * {{ onions_per_node }} + $i))/hs_ed25519_public_key {{ ansible_user }}@{{ ansible_host }}:"{{ target_vm_folder }}/hidden-service-docker-image/web-${i}/"  1>/dev/null
+          scp -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null /app/hidden-service-docker-image/onion_addresses_v3/node$(( ({{ node_index }} - 1) * {{ onions_per_node }} + $i))/hs_ed25519_secret_key {{ ansible_user }}@{{ ansible_host }}:"{{ target_vm_folder }}/hidden-service-docker-image/web-${i}/"  1>/dev/null
+        done
+      #loop: "{{ range(1, 4+1) | batch(4) | list }}"
+      loop: "{{ range(1, onions_per_node+1) | batch(onions_per_node) | list }}"
+      register: syncresult
+      until: syncresult is not failed
+      # retries: 5
+      # delay: 10
+      # ignore_errors: true
+      tags: 
+       - setup_onion
+
+    # - name: Debug onion issues
+    #   debug:
+    #     msg: "{{ item.stdout_lines }}"
+    #   loop: "{{ syncresult.results }}"
+    #   tags: 
+    #     - setup_onion
+
+    - name: Stop all running containers
+      become: no
+      shell: | 
+        docker kill $(docker ps -q)
+      tags: 
+        - stop_docker_tor_onion_services
+
+    - name: Remove docker image
+      become: no
+      shell: | 
+        docker rmi $(docker images | grep 'torp-onion-service')
+      tags: 
+        - stop_docker_tor_onion_services
+
+
+  ######################################################
+  # Configure traffic capture capabilities on Onion side
+  ######################################################
+#- hosts: all_nodes:!client
+- hosts: os_nodes
+  gather_facts: no
+  any_errors_fatal: true
+
+  tasks:
+    - name: Remove file.log
+      file:
+        state: absent
+        path: "{{ target_vm_folder }}/file.log"
+      tags: 
+        - start_capture
+
+    - name: Build docker image
+      become: no
+      # TODO
+      shell: | 
+        docker stop target || true
+        for i in 1 2 3 4
+        do
+          docker stop torp-onion-service-${i} || true
+        done
+        docker build -t torp-onion-service "{{ target_vm_folder }}/hidden-service-docker-image/"
+        docker network rm os_net || true
+        docker network create --subnet 172.{{ static_docker_ip }}.0.0/16 os_net
+      ignore_errors: yes
+      tags: 
+        - build_docker_tor_onion_service
+        - start_capture
+    - name: Stop docker needed by capture script if running
+      ignore_errors: yes
+      # TODO
+      shell: |
+        for i in 1 2 3 4
+        do
+          docker stop torp-onion-service-${i}
+        done
+        docker stop target
+      tags: 
+        - launch_os
+        - start_capture
+    - name: Run target docker container
+      shell: |
+        docker pull {{ os_target_docker_img }}
+        docker run --rm -it --log-opt max-size=5m --log-opt max-file=5 -v "{{ target_vm_folder }}/":/app -v /var/run/docker.sock:/var/run/docker.sock -d --name target --net os_net --ip 172.{{ static_docker_ip }}.0.3 -p 5005:5005 -p 8001:8001 {{ os_target_docker_img }} bash
+      tags: 
+        - launch_os
+        - start_capture
+    - name: Launch docker needed by capture script
+      become: no
+      # TODO
+      #docker run -it --rm --net os_net --ip 172.{{ static_docker_ip }}.0.3 -v "{{ target_vm_folder }}/hidden-service-docker-image/web-1":/web2 --volumes-from target -h "{{ inventory_hostname }}" -p 8080:8080 -p 8081:8081 --entrypoint /serve.sh -d --name torp-onion-service-2 torp-onion-service
+      #docker run -it --rm --net os_net --ip 172.{{ static_docker_ip }}.0.5 -v "{{ target_vm_folder }}/hidden-service-docker-image/web-2":/web2 --volumes-from target -h "{{ inventory_hostname }}" -p 8082:8080 -p 8083:8081 --entrypoint /serve.sh -d --name torp-onion-service-2 torp-onion-service
+      #docker run -it --rm --net os_net --ip 172.{{ static_docker_ip }}.0.6 -v "{{ target_vm_folder }}/hidden-service-docker-image/web-3":/web2 --volumes-from target -h "{{ inventory_hostname }}" -p 8084:8080 -p 8085:8081 --entrypoint /serve.sh -d --name torp-onion-service-3 torp-onion-service
+      #docker run -it --rm --net os_net --ip 172.{{ static_docker_ip }}.0.7 -v "{{ target_vm_folder }}/hidden-service-docker-image/web-4":/web2 --volumes-from target -h "{{ inventory_hostname }}" -p 8086:8080 -p 8087:8081 --entrypoint /serve.sh -d --name torp-onion-service-4 torp-onion-service
+      shell: | 
+        docker run -it --rm --log-opt max-size=5m --log-opt max-file=5 --net os_net --ip 172.{{ static_docker_ip }}.0.{{ item+3 }} -v "{{ target_vm_folder }}/hidden-service-docker-image/web-{{ item }}":/web2 --volumes-from target -h "{{ inventory_hostname }}-os{{ item }}" -p 808{{ (item-1)*2 }}:8080 -p 808{{ ((item-1)*2)+1 }}:8081 --entrypoint /serve.sh -d --name torp-onion-service-{{ item }} torp-onion-service
+      loop: "{{ range(1, onions_per_node+1) }}"
+      tags: 
+        - launch_os
+        - start_capture
+
+    - name: Run capture script 
+      become: no
+      shell: | 
+        docker exec target bash -c "screen -q -X -S torpedo_os_capture quit"
+        docker exec target bash -c "screen -S torpedo_os_capture -L -d -m bash -c \"cd /app && bash ./capture.sh {{ onions_per_node }} \$(echo {{ onion_pages }} | tr -d '[]\",') \""
+        docker exec target bash -c "screen -S torpedo_os_capture -X colon \"logfile flush 0^M\""
+      tags: 
+        - launch_capture
+        - start_capture
+
+    
+    #####################################################
+    # Post-Experiment tasks
+    #####################################################
+    - name: Kill screen session hosting the capture script
+      become: no
+      ignore_errors: true
+      shell: | 
+        docker exec target bash -c "screen -X -S torpedo_os_capture quit"
+      tags: 
+        - kill_screens
+
+    - name: Create directory for onion server-side pcaps
+      local_action:  
+        module: file
+        path: experiment_results/TrafficCapturesOnion/captures-{{ inventory_hostname }}
+        state: directory
+      tags: 
+        - fetch_pcaps_onion
+        - fetch_all_pcaps
+
+    - name: Fetch onion server-side pcaps
+      delegate_to: localhost
+      shell: |
+        j=0
+        for i in $(echo "{{ item }}" | tr -d '[],')
+        do
+          if [ "$j" = "0" ]
+          then
+            j=$(echo $i | sed -e "s/\'//g")
+            continue
+          fi
+          echo "rsync -azP -e ssh -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ ansible_user }}@{{ ansible_host }}:{{ target_vm_folder }}/pcap-folder/client${i}/${j}-{{ inventory_hostname }} experiment_results/TrafficCapturesOnion/captures-${j}-client${i}-{{ inventory_hostname }}"
+          rsync -azP -e "ssh -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" {{ ansible_user }}@{{ ansible_host }}:"{{ target_vm_folder }}/pcap-folder/client${i}/captures-*" "experiment_results/TrafficCapturesOnion/captures_${j}-client${i}_{{ inventory_hostname }}" 1>/dev/null &
+          j=0
+        done
+      loop: "{{ groups['client_nodes'] | product(range(1, clients_per_node+1)) | batch(25) | list }}"
+      # todo: some clients may not access...
+      async: 120
+      poll: 0
+      ignore_errors: no
+      register: async_fetch_onion_pcap_folder
+      tags: 
+        - fetch_pcaps_onion
+        - fetch_all_pcaps
+
+    - name: Gather onion-side logs
+      delegate_to: localhost
+      shell: |
+        for i in $(echo "{{ item }}" | tr -d '[],')
+        do
+          mkdir -p "experiment_results/TrafficCapturesOnion/captures_{{ inventory_hostname }}"
+          ssh -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ ansible_user }}@{{ ansible_host }} "tail -n 400 {{ target_vm_folder }}/file.log" > "experiment_results/TrafficCapturesOnion/captures_{{ inventory_hostname }}/file.log" 
+        done
+      async: 120
+      poll: 0
+      loop: "{{ range(1, clients_per_node+1) | batch(5) | list }}"
+      register: async_fetch_logs
+      tags:
+        - fetch_inc_log
+
+    - name: Fetch onion server-side pcaps full capture
+      synchronize:  src="{{ target_vm_folder }}/pcap-folder/full-onion" dest=experiment_results/TrafficCapturesOnion/captures-{{ inventory_hostname }} mode=pull
+      tags: 
+        - fetch_pcaps_onion_full
+        - fetch_all_pcaps
+
+    - name: Wait fetch onion server-side pcaps full capture
+      delegate_to: localhost # needs to match the one in the task
+      async_status:
+        jid: "{{item.ansible_job_id}}"
+        mode: status
+      retries: 5
+      delay: 31
+      ignore_errors: no
+      loop: "{{ async_fetch_onion_pcap_folder.results }}"
+      register: async_fetch_onion_pcap_folder_jobs
+      until: async_fetch_onion_pcap_folder_jobs.finished
+      tags: 
+        - fetch_pcaps_onion
+        - fetch_all_pcaps
+
+    - name: Remove pcap folder at the end of an experiment
+      become: yes
+      file:
+        state: absent
+        path: /home/daniela_lopes/pcap-folder/
+      tags: 
+        - rm_pcaps
+
+    - name: Remove file.log at the end of an experiment
+      file:
+        state: absent
+        path: /home/daniela_lopes/file.log
+      tags: 
+        - rm_pcaps
+
+
+######################################################
+# Configure experiments on the client side
+######################################################
+- hosts: job-coordinator
+  gather_facts: no
+  tasks:
+    - name: (re-)start bridge
+      become: no
+      ignore_errors: true
+      shell: | 
+        docker exec target bash -c "docker-compose -f start-bridge.yml down; sleep 1s; docker-compose -f start-bridge.yml up -d obfs4-bridge; sleep 1s"
+      tags: 
+       - bridge_line
+    ### TODO: sometimes does not work, get-bridge-line reads from docker logs, and sometimes there is an issue with the output
+    - name: Get bridge line
+      become: no
+      ignore_errors: false
+      shell: | 
+        sleep 5s
+        docker exec tor-obfs4-bridge get-bridge-line > bridge_config_line.txt
+        cat bridge_config_line.txt | sed -n 's/obfs4 \(.*\):\([1-9]*\) .*/\1:\2/p' > bridge_location.txt
+      tags: 
+       - bridge_line
+
+    #- name: Fix path of onion server-side pcaps
+    #  delegate_to: localhost
+    #  shell: |
+    #    for f in experiment_results/TrafficCapturesOnion/captures_client-*_os-*/captures*/* ; do
+    #      NEW_F=$(echo $f | sed -n "s/experiment\_results\/TrafficCapturesOnion\/captures\_\(.*\)\_os-\(.*\)\/captures-.*\/\(.*\)\_\(.*\)-os-\(.*\)/experiment\_results\/TrafficCapturesOnion\/captures\_\1\_\4-os-\2\/\1\_\4-os-\5/p")
+    #      mkdir -p $(dirname $NEW_F)
+    #      mv $f $NEW_F
+    #    done
+    #    rm -fr experiment_results/TrafficCapturesOnion/captures_client-*_os-*/
+    #  tags: 
+    #    - fetch_pcaps_onion
+
+- hosts: client_nodes
+  gather_facts: no
+  any_errors_fatal: true
+ 
+  tasks:
+    - name: Allow the bash script to be executed
+      become: yes
+      shell: chmod +x experiment.sh
+      tags: 
+        - config_exp
+    
+    - name: Copy get_onion_with_selenium.py script to the machines
+      copy:
+        src: get_onion_with_selenium.py
+        dest: ~/get_onion_with_selenium.py
+      tags: 
+        - config_exp
+
+    - name: Copy inventory.cfg to the machines
+      copy:
+        src: inventory.cfg
+        dest: ~/inventory.cfg
+      tags: 
+      - config_exp
+
+    #####################################################
+    # Experiment execution tasks
+    #####################################################
+    - name: Send bridge line to clients
+      become: no
+      delegate_to: localhost
+      any_errors_fatal: no
+      shell: | 
+        scp -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ./bridge_config_line.txt {{ ansible_user }}@{{ ansible_host }}:"{{ target_vm_folder }}/bridge_config_line.txt"
+        scp -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ./bridge_location.txt {{ ansible_user }}@{{ ansible_host }}:"{{ target_vm_folder }}/bridge_location.txt"
+      tags: 
+       - run_exp
+
+    - name: Kill experiment if running
+      become: no
+      any_errors_fatal: no
+      shell: | 
+        docker exec target bash -c "if [ -f kill_experiment.sh ] ; then bash kill_experiment.sh ; rm kill_experiment.sh ; fi"
+      tags: 
+       - kill_exp
+       - run_exp
+
+    - name: Run experiment script
+      become: no
+      shell: | 
+        docker exec target bash -c "screen -q -X -S torpedo quit"
+        docker exec target bash -c "cd /app && screen -S torpedo -L -d -m bash -c \"bash ./experiment.sh {{ onions_per_node }} {{ request_iterations }} {{ request_iterations }}\""
+        docker exec target bash -c "cd /app && screen -S torpedo -X colon \"logfile flush 0^M\""
+      tags: 
+       - run_exp
+
+    #####################################################
+    # Post-Experiment tasks
+    #####################################################
+    - name: Fetch experiment logs
+      fetch:
+        src: ~/screenlog.0
+        dest: experiment_results/logs/{{ inventory_hostname }}.log
+        flat: yes
+      tags: 
+       - post_exp
+       - fetch_all_pcaps
+    
+    - name: Kill screen session hosting the experiment script
+      become: no
+      shell: | 
+        docker exec target bash -c "screen -X -S torpedo quit"
+      tags: 
+        - kill_screens
+
+    - name: Gather client-side pcaps
+      delegate_to: localhost
+      shell: |
+        for i in $(echo "{{ item }}" | tr -d '[],')
+        do
+          mkdir -p "experiment_results/TrafficCapturesClient/captures-{{ inventory_hostname }}/client${i}"
+          rsync -azP -e "ssh -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" {{ ansible_user }}@{{ ansible_host }}:"{{ target_vm_folder }}/pcap-folder/client${i}/captures-*" "experiment_results/TrafficCapturesClient/captures-{{ inventory_hostname }}/client${i}"
+          scp -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ ansible_user }}@{{ ansible_host }}:"{{ target_vm_folder }}/pcap-folder/client${i}/file.log" "experiment_results/TrafficCapturesClient/captures-{{ inventory_hostname }}/client${i}/" 
+          scp -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ ansible_user }}@{{ ansible_host }}:"{{ target_vm_folder }}/pcap-folder/client${i}/failed_requests.log" "experiment_results/TrafficCapturesClient/captures-{{ inventory_hostname }}/client${i}/" 
+        done
+      async: 120
+      poll: 0
+      loop: "{{ range(1, clients_per_node+1) | batch(5) | list }}"
+      register: async_fetch_pcap_folder
+      tags: 
+        - fetch_pcaps_client
+        - fetch_all_pcaps
+
+    - name: Gather client-side logs
+      delegate_to: localhost
+      shell: |
+        for i in $(echo "{{ item }}" | tr -d '[],')
+        do
+          mkdir -p "experiment_results/TrafficCapturesClient/captures_{{ inventory_hostname }}/client${i}"
+          ssh -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ ansible_user }}@{{ ansible_host }} "tail -n 400 {{ target_vm_folder }}/pcap-folder/client${i}/file.log" > "experiment_results/TrafficCapturesClient/captures_{{ inventory_hostname }}/client${i}/file.log" 
+        done
+      async: 120
+      poll: 0
+      loop: "{{ range(1, clients_per_node+1) | batch(5) | list }}"
+      register: async_fetch_logs
+      tags:
+        - fetch_inc_log
+
+    - name: Remove pcap folder at the end of an experiment
+      file:
+        state: absent
+        path: "{{ target_vm_folder }}/pcap-folder/client{{ item }}"
+      loop: "{{ range(1, clients_per_node+1) | batch(5) | list }}"
+      tags: 
+        - rm_pcaps
+
+    - name: Wait create directory for client-side pcaps
+      delegate_to: localhost # needs to match the one in the task
+      async_status:
+        jid: "{{item.ansible_job_id}}"
+        mode: status
+      retries: 10
+      delay: 3
+      ignore_errors: true
+      loop: "{{ async_fetch_pcap_folder.results }}"
+      register: async_fetch_pcap_folder_jobs
+      until: async_fetch_pcap_folder_jobs.finished
+      tags: 
+        - fetch_pcaps_client
+        - fetch_all_pcaps
+
+    #- name: Fix path of onion client-side pcaps
+    #  delegate_to: localhost
+    #  shell: |
+    #    for f in experiment_results/TrafficCapturesClient/captures-client-*/client*/captures*/* ; do
+    #      NEW_F=$(echo $f | sed -n "s/experiment\_results\/TrafficCapturesClient\/captures-\(.*\)\/client\(.*\)\/captures-.*\/\(.*\)/experiment\_results\/TrafficCapturesClient\/captures\_\1-client\2\/\3/p")
+    #      mkdir -p $(dirname $NEW_F)
+    #      mv $f $NEW_F
+    #    done
+    #    rm -fr experiment_results/TrafficCapturesClient/captures-client-*/client*/captures*/
+    #  tags: 
+    #    - fetch_pcaps_client
+
+######################################################
+# Miscellaneous configurations
+######################################################
+- hosts: os_nodes
+  gather_facts: no
+  any_errors_fatal: true
+  become: yes
+  become_user: root
+
+  tasks:
+    #####################################################
+    # Node management tasks
+    #####################################################
+    - name: Prepare onion pages
+      delegate_to: localhost
+      # TODO
+      shell: |
+        for i in $(seq {{ onions_per_node }})
+        do
+          ssh -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ ansible_user }}@{{ ansible_host }} "mkdir -p {{ target_vm_folder }}/hidden-service-docker-image/web-${i}/www/onion_pages/"
+          rsync -azP -e "ssh -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" /app/onion_pages/$(echo {{ onion_pages }} | tr -d "[],\"'" | cut -d " " -f $i) {{ ansible_user }}@{{ ansible_host }}:"{{ target_vm_folder }}/hidden-service-docker-image/web-${i}/www/onion_pages/"
+        done
+      register: syncresult
+      until: syncresult is not failed
+      # retries: 5
+      # delay: 10
+      # ignore_errors: true
+      tags: 
+       - upload_real_onion_pages
+    - name: Prepare remaining onion pages
+      delegate_to: localhost
+      shell: |
+        rsync -azP -e "ssh -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" /app/onion_pages/{{ item }} {{ ansible_user }}@{{ ansible_host }}:"{{ target_vm_folder }}/hidden-service-docker-image/web-{{ i+2 }}/www/onion_pages/"  1>/dev/null
+      register: syncresult
+      until: syncresult is not failed
+      # retries: 5
+      # delay: 10
+      # ignore_errors: true
+      loop: "{{ onion_pages[1:] }}"
+      loop_control:
+        index_var: i
+      tags: 
+        - upload_real_onion_pages
+
+    - name: Creates directory multiple_pages/
+      file:
+        path: "{{ target_vm_folder }}/hidden-service-docker-image/web-1/www/onion_pages/multiple_pages/"
+        state: directory
+      tags: 
+        - upload_multiple_pages
+
+    - name: Copy onion pages with multiple pages to the machines
+      synchronize:
+        src: onion_multiple_pages/
+        dest: "{{ target_vm_folder }}/hidden-service-docker-image/web/www/onion_pages/multiple_pages/"
+      tags: 
+        - upload_multiple_pages
+
+
+    - name: Recursively remove onion pages directory
+      file:
+        path: "{{ target_vm_folder }}/web/www/onion_pages/"
+        state: absent
+      tags: 
+        - clear_onion_pages
+
+    - name: Resize 1
+      command: sudo growpart /dev/sda 1
+      tags:
+        - resize_disk
+
+    - name: Resize 2
+      command: sudo resize2fs /dev/sda1
+      tags:
+        - resize_disk
+        
+    - name: Recursively remove pcaps directory
+      shell: |
+        sudo rm -f screenlog* file.log
+      tags:
+        - clear_pcap_folder
+        - rm_pcaps
+
+- hosts: client_nodes
+  gather_facts: no
+  any_errors_fatal: no
+  become: yes
+  become_user: root
+  tasks:
+    - name: Recursively remove pcaps directory
+      shell: |
+        if [ -f {{ target_vm_folder }}/kill_experiment.sh ]
+        then
+          docker exec target bash -c "bash kill_experiment.sh ; rm kill_experiment.sh"
+        fi
+        rm -f screenlog*
+      tags:
+        - clear_pcap_folder
+        - rm_pcaps
+
+
+- hosts: client_nodes:os_nodes
+  gather_facts: no
+  any_errors_fatal: true
+  become: yes
+  become_user: root
+  
+  tasks:
+
+    - name: Recursively remove pcaps directory
+      shell: |
+        rm -fr "{{ target_vm_folder }}/pcap-folder/*"
+      tags:
+        - clear_pcap_folder
+        - rm_pcaps
+
+
+- hosts: client_nodes:os_nodes
+  tasks:
+    - name: Stop docker containers
+      become: no
+      shell: | 
+        docker kill $(docker ps -q)
+      tags: 
+        - kill_containers

@@ -1,0 +1,252 @@
+---
+- name: Global variables for all tags
+  hosts: all
+  tasks:
+    - set_fact:
+        target_vm_folder: "{{=== T_VM_HOME_FOLDER ===}}"
+        ssh_key: "{{=== T_ANSIBLE_KEY ===}}"
+        remote_user: "{{=== T_USER ===}}"
+        os_target_docker_img: "dcastro93/dpss:danon_os"
+        client_target_docker_img: "dcastro93/dpss:danon_client"
+        # client_tor_docker_img: "dcastro93/dpss:tor_client"
+        job_coordinator_target_docker_img: "dcastro93/dpss:danon_job_manager"
+      tags: 
+        - setup_packages
+        - run_collection
+        - copy_stuff
+        - config_exp
+        - setup_onion
+        - build_docker_tor_onion_service
+        - start_capture
+        - fetch_dataset
+        - experiment_scale_tor_higher_concurrency
+        - copy_pages
+        
+- hosts: client_nodes:os_nodes:coordinator
+  gather_facts: True
+  remote_user: "{{ remote_user }}"
+  become: yes
+
+  tasks:
+    - name: Stop target if running
+      ignore_errors: yes
+      shell: |
+        docker ps -aq | xargs docker stop | xargs docker rm
+      tags: 
+        - setup_packages
+
+    - name: Remove screenlog.0
+      file:
+        state: absent
+        path: "{{ target_vm_folder }}/screenlog.0"
+      tags: 
+        - setup_packages
+
+    - name: Remove pcaps
+      file:
+        state: absent
+        path: "{{ target_vm_folder }}/pcap-folder/"
+      tags: 
+        - setup_packages
+
+- hosts: coordinator
+  gather_facts: True
+  remote_user: "{{ remote_user }}"
+  become: no
+
+  tasks:
+    - name: Pull image async
+      shell: |
+        docker pull {{ job_coordinator_target_docker_img }}
+      register: pullresult
+      async: 120
+      poll: 0
+      tags: 
+        - setup_packages
+
+    - name: Prepare coordinator
+      shell: |
+        scp -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "./run_collection_job_manager.yml" {{ ansible_user }}@{{ ansible_host }}:"~/run_collection.yml" 1>/dev/null &
+        scp -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "./ansible.cfg" {{ ansible_user }}@{{ ansible_host }}:"~/ansible.cfg" 1>/dev/null &
+        scp -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "./remote_stuff/job_coordinator_scale_tor.py" {{ ansible_user }}@{{ ansible_host }}:"~/job_coordinator_scale_tor.py" 1>/dev/null &
+        rsync -azP -e "ssh -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" "./hidden-service-docker-image/" {{ ansible_user }}@{{ ansible_host }}:"~/hidden-service-docker-image/" 1>/dev/null &
+        scp -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ ansible_ssh_private_key_file }} {{ ansible_user }}@{{ ansible_host }}:"~/ssh_key_file" &
+        scp -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "{{=== T_ANSIBLE_INVENTORY ===}}" {{ ansible_user }}@{{ ansible_host }}:"~/inventory.cfg" 1>/dev/null
+        ssh -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ ansible_user }}@{{ ansible_host }} "sed -i 's/\(ansible_ssh_private_key_file.*=\).* \(node_name=\)/\1\/app\/ssh_key_file \2/g' inventory.cfg" 
+        ssh -i {{ ansible_ssh_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {{ ansible_user }}@{{ ansible_host }} "sed -i 's/^\(inventory.*=\).*\$/\1\/app\/inventory.cfg/g' ansible.cfg" 
+      delegate_to: localhost
+      async: 120
+      poll: 0
+      register: prepresult
+      tags: 
+        - setup_packages
+        - run_collection
+
+
+    - name: Wait prepare coordinator
+      delegate_to: localhost
+      async_status:
+        jid: "{{prepresult.ansible_job_id}}"
+        mode: status
+      retries: 20
+      delay: 11
+      # loop: "{{ prepresult.results }}"
+      register: prepresult_jobs
+      until: prepresult_jobs.finished
+      tags: 
+        - setup_packages
+        - run_collection
+
+    - name: Wait pull image
+      async_status:
+        jid: "{{pullresult.ansible_job_id}}"
+        mode: status
+      retries: 10
+      delay: 11
+      # loop: "{{ prepresult.results }}"
+      register: pullresult_jobs
+      until: pullresult_jobs.finished
+      tags: 
+        - setup_packages
+
+    - name: Run target docker container
+      shell: |
+        docker run --rm -it --log-opt max-size=5m --log-opt max-file=5 -v "{{ target_vm_folder }}":/app -d --name target -h "{{ inventory_hostname }}" -v /var/run/docker.sock:/var/run/docker.sock -p 5005:5005 {{ job_coordinator_target_docker_img }} bash
+        docker exec target bash -c "screen -S experiment -L -d -m bash -c \"while [ ! -f decompressDone.txt ] ; do sleep 1s ; done && python3 job_coordinator_scale_tor.py\"" && docker exec target bash -c "screen -S experiment -X colon \"logfile flush 0^M\""
+      register: dockerresult
+      async: 200
+      poll: 21
+      tags: 
+        - setup_packages
+
+- hosts: os_nodes:coordinator
+  gather_facts: True
+  remote_user: "{{ remote_user }}"
+  become: no
+  tasks:
+    - name: Copy stuff
+      synchronize:
+        src: remote_stuff/
+        dest: "{{ target_vm_folder }}/"
+      register: copyresult
+      until: copyresult is not failed
+      retries: 5
+      delay: 10
+      ignore_errors: true
+      tags: 
+        - setup_packages
+        - copy_stuff
+
+- hosts: client_nodes
+  gather_facts: True
+  remote_user: "{{ remote_user }}"
+  become: no
+
+  tasks:
+    - name: Copy stuff
+      synchronize:
+        src: remote_stuff/
+        dest: "{{ target_vm_folder }}/"
+      register: copyresult
+      until: copyresult is not failed
+      retries: 5
+      delay: 10
+      ignore_errors: true
+      tags: 
+        - setup_packages
+        - copy_stuff
+
+    - name: Copy experiment.sh script to the machines
+      template:
+        src: templates/experiment.j2
+        dest: "{{ target_vm_folder }}/experiment.sh"
+      register: copyresult
+      until: copyresult is not failed
+      retries: 5
+      delay: 10
+      tags: 
+       - setup_packages
+       - copy_stuff
+
+- hosts: client_nodes:os_nodes
+  tasks:
+    - name: Copy ansible config
+      synchronize:
+        src: ansible.cfg
+        dest: "{{ target_vm_folder }}/ansible.cfg"
+      register: copyresult
+      until: copyresult is not failed
+      retries: 5
+      delay: 10
+      tags: 
+        - setup_packages
+        - copy_ansible_cfg
+
+
+# -v /var/run/docker.sock:/var/run/docker.sock so that this container can launch external containers
+# It will interact with the daemon just as if you were using docker from the host
+# docker network create --subnet 172.{{ static_docker_ip }}.0.0/16 clients
+# docker run --rm -it --log-opt max-size=5m --log-opt max-file=5 --net clients --ip 172.126.0.2 -v "/home/daniela_lopes/":/app -v /var/run/docker.sock:/var/run/docker.sock -d --name target -h "client-7-validate" -p 5005:5005 {{ client_target_docker_img }} bash
+- hosts: client_nodes
+  gather_facts: yes
+  any_errors_fatal: true
+  tasks:
+    - name: Run target docker container
+      shell: |
+        docker network create --subnet 172.{{ static_docker_ip }}.0.0/16 clients
+        docker run --rm -it --log-opt max-size=5m --log-opt max-file=5 --net clients --ip 172.{{ static_docker_ip }}.0.2 -v "{{ target_vm_folder }}/":/app -v /var/run/docker.sock:/var/run/docker.sock -d --name target -h "{{ inventory_hostname }}" -p 5005:5005 {{ client_target_docker_img }} bash
+      register: dockerresult
+      until: dockerresult is not failed
+      retries: 5
+      delay: 10
+      ignore_errors: true
+      tags: 
+        - setup_packages
+        - start_client_target
+
+    - name: Client directories
+      shell: |
+        for i in $(echo "{{ item }}" | tr -d '[],')
+        do
+          mkdir -p "{{ target_vm_folder }}/pcap-folder/client${i}"
+        done
+      async: 20
+      poll: 0
+      ignore_errors: true
+      loop: "{{ range(1, clients_per_node+1) | batch(5) | list }}"
+      register: async_loop
+      tags: 
+        - setup_packages
+        - start_client_target
+        - client_dirs
+
+    - name: Wait client directories
+      async_status:
+        jid: "{{item.ansible_job_id}}"
+        mode: status
+      retries: 5
+      delay: 1
+      ignore_errors: true
+      loop: "{{ async_loop.results }}"
+      register: async_loop_jobs
+      until: async_loop_jobs.finished
+      tags: 
+        - setup_packages
+        - start_client_target
+        - client_dirs
+
+- hosts: coordinator
+  gather_facts: no
+  any_errors_fatal: true
+  tasks:
+    - name: Fetch dataset
+    # TODO
+      # synchronize:  src=/home/dcastro/experiment_results dest=/Volumes/TOSHIBA_EXT mode=pull
+      #synchronize:  src="{{ target_vm_folder }}/experiment_results dest=/Users/daniel/Downloads/danon_20221214" mode=pull
+      synchronize:  
+        src: "{{ target_vm_folder }}/experiment_results "
+        dest: "/Users/danielalopes/Downloads/dataset_20_16_1500" 
+        mode: pull
+      tags: 
+        - fetch_dataset
+
