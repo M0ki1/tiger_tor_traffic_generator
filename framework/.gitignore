@@ -19,3 +19,4 @@ testbed/onion_pages_small
 *.txt
 os_crawling/pages_crawled2022/*
 os_crawling/onion_pages_*
+launch_template/credentials/account.sh
