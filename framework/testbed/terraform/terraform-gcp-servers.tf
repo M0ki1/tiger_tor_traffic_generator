@@ -29,7 +29,7 @@ resource "google_compute_instance" "os-nodes" {
         #image = "ubuntu-1804-bionic-v20201116"
         #image = "debian-10-buster-v20211209"
         image = "cos-cloud/cos-109-lts"
-        size = 50
+        size = var.DISK_SIZE_ONION
         }
     }
 
@@ -101,7 +101,7 @@ resource "google_compute_instance" "client-nodes" {
         #image = "ubuntu-1804-bionic-v20201116"
         # image = "debian-10-buster-v20211209"
         image = "cos-cloud/cos-109-lts"
-        size = 30
+        size = var.DISK_SIZE_CLIENT
         }
     }
 
@@ -149,7 +149,7 @@ resource "google_compute_instance" "job-coordinator" {
         # https://cloud.google.com/compute/docs/images
         #image = "ubuntu-1804-bionic-v20201116"
         image = "cos-cloud/cos-109-lts"
-        size = 20
+        size = var.DISK_SIZE_JOB_COORDINATOR
         }
     }
 
