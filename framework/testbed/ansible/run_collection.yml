@@ -136,6 +136,16 @@
       tags: 
         - setup_packages
         - copy_stuff
+    
+    - name: Restore home directory permissions after copy
+      file:
+        path: "{{ target_vm_folder }}"
+        mode: "0755"
+        owner: "{{ remote_user }}"
+        group: "{{ remote_user }}"
+      tags: 
+        - setup_packages
+        - copy_stuff
 
 - hosts: client_nodes
   gather_facts: True
@@ -156,6 +166,19 @@
         - setup_packages
         - copy_stuff
 
+
+# ADDED BY MOKI
+
+    - name: Restore home directory permissions after copy
+      file:
+        path: "{{ target_vm_folder }}"
+        mode: "0755"
+        owner: "{{ remote_user }}"
+        group: "{{ remote_user }}"
+      tags: 
+        - setup_packages
+        - copy_stuff
+
     - name: Copy experiment.sh script to the machines
       template:
         src: templates/experiment.j2
@@ -168,6 +191,18 @@
        - setup_packages
        - copy_stuff
 
+
+    - name: Restore home directory permissions after template copy
+      file:
+        path: "{{ target_vm_folder }}"
+        mode: "0755"
+        owner: "{{ remote_user }}"
+        group: "{{ remote_user }}"
+      tags: 
+       - setup_packages
+       - copy_stuff
+
+
 - hosts: client_nodes:os_nodes
   tasks:
     - name: Copy ansible config
@@ -178,6 +213,17 @@
       until: copyresult is not failed
       retries: 5
       delay: 10
+      tags: 
+        - setup_packages
+        - copy_ansible_cfg
+
+    
+    - name: Restore home directory permissions after ansible config copy
+      file:
+        path: "{{ target_vm_folder }}"
+        mode: "0755"
+        owner: "{{ remote_user }}"
+        group: "{{ remote_user }}"
       tags: 
         - setup_packages
         - copy_ansible_cfg

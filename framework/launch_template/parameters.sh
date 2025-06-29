@@ -6,9 +6,11 @@ function replace_parameters_on_file() {
 
   for p in "${!template_vars[@]}" ; do
     pattern="{{=== $p ===}}"
-    grep "$pattern" $1 && sed -i '' "s|$pattern|${template_vars[$p]}|g" $1
+
+    grep "$pattern" $1 && sed -i  "s|$pattern|${template_vars[$p]}|g" $1
   done
 
+  
   # generate T_NODES_ONION_NAMES
   base_onion_name="os-${template_vars['T_EXP_NAME']}-"
   pattern='{{=== T_NODES_ONION_NAMES ===}}'
@@ -17,7 +19,7 @@ function replace_parameters_on_file() {
     name_onion="${name_onion}\"${base_onion_name}${i}\","
   done
   name_onion="${name_onion}\"${base_onion_name}$((${template_vars['T_NB_NODES_ONION']} + 1))\" ]"
-  grep "$pattern" $1 && sed -i '' "s|$pattern|${name_onion}|g" $1
+  grep "$pattern" $1 && sed -i  "s|$pattern|${name_onion}|g" $1
   
   # generate T_NODES_CLIENT_NAMES
   base_client_name="client-${template_vars['T_EXP_NAME']}-"
@@ -27,7 +29,7 @@ function replace_parameters_on_file() {
     name_client="${name_client}\"${base_client_name}${i}\","
   done
   name_client="${name_client}\"${base_client_name}$((${template_vars['T_NB_NODES_CLIENT']} + 1))\" ]"
-  grep "$pattern" $1 && sed -i '' "s|$pattern|${name_client}|g" $1
+  grep "$pattern" $1 && sed -i  "s|$pattern|${name_client}|g" $1
   
   # generate T_NODES_CLIENT_IPS
   pattern='{{=== T_NODES_CLIENT_IPS ===}}'
@@ -37,7 +39,7 @@ function replace_parameters_on_file() {
     list_of_ips="${list_of_ips}\"${i}\","
   done
   list_of_ips="${list_of_ips}\"$((19 + $nb_clients + 1))\" ]"
-  grep "$pattern" $1 && sed -i '' "s|$pattern|${list_of_ips}|g" $1
+  grep "$pattern" $1 && sed -i  "s|$pattern|${list_of_ips}|g" $1
 
   # generate T_NODES_ONION_IPS
   pattern='{{=== T_NODES_ONION_IPS ===}}'
@@ -47,6 +49,6 @@ function replace_parameters_on_file() {
     list_of_ips="${list_of_ips}\"${i}\","
   done
   list_of_ips="${list_of_ips}\"$((120 + $nb_onions + 1))\" ]"
-  grep "$pattern" $1 && sed -i '' "s|$pattern|${list_of_ips}|g" $1
+  grep "$pattern" $1 && sed -i  "s|$pattern|${list_of_ips}|g" $1
   
 }

@@ -28,7 +28,7 @@ resource "google_compute_instance" "os-nodes" {
         # https://cloud.google.com/compute/docs/images
         #image = "ubuntu-1804-bionic-v20201116"
         #image = "debian-10-buster-v20211209"
-        image = "cos-cloud/cos-101-lts"
+        image = "cos-cloud/cos-109-lts"
         size = 50
         }
     }
@@ -100,7 +100,7 @@ resource "google_compute_instance" "client-nodes" {
         # https://cloud.google.com/compute/docs/images
         #image = "ubuntu-1804-bionic-v20201116"
         # image = "debian-10-buster-v20211209"
-        image = "cos-cloud/cos-101-lts"
+        image = "cos-cloud/cos-109-lts"
         size = 30
         }
     }
@@ -148,7 +148,7 @@ resource "google_compute_instance" "job-coordinator" {
         # image list can be found at:
         # https://cloud.google.com/compute/docs/images
         #image = "ubuntu-1804-bionic-v20201116"
-        image = "cos-cloud/cos-101-lts"
+        image = "cos-cloud/cos-109-lts"
         size = 20
         }
     }
@@ -176,7 +176,7 @@ resource "google_compute_instance" "job-coordinator" {
 #         # image list can be found at:
 #         # https://cloud.google.com/compute/docs/images
 #         #image = "ubuntu-1804-bionic-v20201116"
-#         image = "cos-cloud/cos-101-lts"
+#         image = "cos-cloud/cos-109-lts"
 #         size = 100
 #         }
 #     }
