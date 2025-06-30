@@ -226,10 +226,6 @@ class BrowserHandler:
             if None == self.driver:
                 self.driver = start_selenium_driver(self.driver)
             self.driver.get(url)
-<<<<<<< HEAD
-
-=======
->>>>>>> 5ced9b9768c2e0cf67dac428a4a4c61602503427
             ls = self.driver.find_elements(By.TAG_NAME, "a")
             tmp_links = [l for l in ls if (l is not None and l.get_attribute('href') is not None)]
             tmp_hrefs = [l.get_attribute('href') for l in tmp_links]

@@ -82,82 +82,104 @@
         - stop_docker_tor_onion_services
 
 
-  ######################################################
-  # Configure traffic capture capabilities on Onion side
-  ######################################################
+######################################################
+# Configure traffic capture capabilities on Onion side
+######################################################
 #- hosts: all_nodes:!client
 - hosts: os_nodes
   gather_facts: no
   any_errors_fatal: true
-
   tasks:
     - name: Remove file.log
       file:
         state: absent
         path: "{{ target_vm_folder }}/file.log"
-      tags: 
+      tags:
         - start_capture
 
-    - name: Build docker image
-      become: no
-      # TODO
-      shell: | 
+    - name: Stop existing docker containers if running
+      ignore_errors: yes
+      shell: |
         docker stop target || true
         for i in 1 2 3 4
         do
           docker stop torp-onion-service-${i} || true
         done
-        docker build -t torp-onion-service "{{ target_vm_folder }}/hidden-service-docker-image/"
-        docker network rm os_net || true
-        docker network create --subnet 172.{{ static_docker_ip }}.0.0/16 os_net
-      ignore_errors: yes
-      tags: 
+      tags:
         - build_docker_tor_onion_service
-        - start_capture
-    - name: Stop docker needed by capture script if running
-      ignore_errors: yes
-      # TODO
-      shell: |
-        for i in 1 2 3 4
-        do
-          docker stop torp-onion-service-${i}
-        done
-        docker stop target
-      tags: 
         - launch_os
         - start_capture
+
+    - name: Build docker image
+      become: no
+      shell: |
+        echo "Building Docker image from: {{ target_vm_folder }}/hidden-service-docker-image/"
+        ls -la "{{ target_vm_folder }}/hidden-service-docker-image/"
+        docker build -t torp-onion-service "{{ target_vm_folder }}/hidden-service-docker-image/"
+        echo "Build completed, checking if image exists:"
+        docker images torp-onion-service
+        docker network rm os_net || true
+        docker network create --subnet 172.{{ static_docker_ip }}.0.0/16 os_net
+      register: build_result
+      tags:
+        - build_docker_tor_onion_service
+        - start_capture
+
+    - name: Display build output
+      debug:
+        msg: |
+          Build stdout: {{ build_result.stdout }}
+          Build stderr: {{ build_result.stderr }}
+          Build return code: {{ build_result.rc }}
+      tags:
+        - build_docker_tor_onion_service
+        - start_capture
+
+    - name: Verify docker image exists before launching containers
+      shell: docker images -q torp-onion-service
+      register: image_check
+      tags:
+        - launch_os
+        - start_capture
+
+    - name: Fail if image doesn't exist
+      fail:
+        msg: "Docker image 'torp-onion-service' was not found. Build may have failed silently."
+      when: image_check.stdout == ""
+      tags:
+        - launch_os
+        - start_capture
+
+
+
     - name: Run target docker container
       shell: |
         docker pull {{ os_target_docker_img }}
         docker run --rm -it --log-opt max-size=5m --log-opt max-file=5 -v "{{ target_vm_folder }}/":/app -v /var/run/docker.sock:/var/run/docker.sock -d --name target --net os_net --ip 172.{{ static_docker_ip }}.0.3 -p 5005:5005 -p 8001:8001 {{ os_target_docker_img }} bash
-      tags: 
-        - launch_os
-        - start_capture
-    - name: Launch docker needed by capture script
-      become: no
-      # TODO
-      #docker run -it --rm --net os_net --ip 172.{{ static_docker_ip }}.0.3 -v "{{ target_vm_folder }}/hidden-service-docker-image/web-1":/web2 --volumes-from target -h "{{ inventory_hostname }}" -p 8080:8080 -p 8081:8081 --entrypoint /serve.sh -d --name torp-onion-service-2 torp-onion-service
-      #docker run -it --rm --net os_net --ip 172.{{ static_docker_ip }}.0.5 -v "{{ target_vm_folder }}/hidden-service-docker-image/web-2":/web2 --volumes-from target -h "{{ inventory_hostname }}" -p 8082:8080 -p 8083:8081 --entrypoint /serve.sh -d --name torp-onion-service-2 torp-onion-service
-      #docker run -it --rm --net os_net --ip 172.{{ static_docker_ip }}.0.6 -v "{{ target_vm_folder }}/hidden-service-docker-image/web-3":/web2 --volumes-from target -h "{{ inventory_hostname }}" -p 8084:8080 -p 8085:8081 --entrypoint /serve.sh -d --name torp-onion-service-3 torp-onion-service
-      #docker run -it --rm --net os_net --ip 172.{{ static_docker_ip }}.0.7 -v "{{ target_vm_folder }}/hidden-service-docker-image/web-4":/web2 --volumes-from target -h "{{ inventory_hostname }}" -p 8086:8080 -p 8087:8081 --entrypoint /serve.sh -d --name torp-onion-service-4 torp-onion-service
-      shell: | 
-        docker run -it --rm --log-opt max-size=5m --log-opt max-file=5 --net os_net --ip 172.{{ static_docker_ip }}.0.{{ item+3 }} -v "{{ target_vm_folder }}/hidden-service-docker-image/web-{{ item }}":/web2 --volumes-from target -h "{{ inventory_hostname }}-os{{ item }}" -p 808{{ (item-1)*2 }}:8080 -p 808{{ ((item-1)*2)+1 }}:8081 --entrypoint /serve.sh -d --name torp-onion-service-{{ item }} torp-onion-service
-      loop: "{{ range(1, onions_per_node+1) }}"
-      tags: 
+      tags:
         - launch_os
         - start_capture
 
-    - name: Run capture script 
+    - name: Launch docker needed by capture script
       become: no
-      shell: | 
+      shell: |
+        docker run -it --rm --log-opt max-size=5m --log-opt max-file=5 --net os_net --ip 172.{{ static_docker_ip }}.0.{{ item+3 }} -v "{{ target_vm_folder }}/hidden-service-docker-image/web-{{ item }}":/web2 --volumes-from target -h "{{ inventory_hostname }}-os{{ item }}" -p 808{{ (item-1)*2 }}:8080 -p 808{{ ((item-1)*2)+1 }}:8081 --entrypoint /serve.sh -d --name torp-onion-service-{{ item }} torp-onion-service
+      loop: "{{ range(1, onions_per_node+1) }}"
+      tags:
+        - launch_os
+        - start_capture
+
+    - name: Run capture script
+      become: no
+      shell: |
         docker exec target bash -c "screen -q -X -S torpedo_os_capture quit"
         docker exec target bash -c "screen -S torpedo_os_capture -L -d -m bash -c \"cd /app && bash ./capture.sh {{ onions_per_node }} \$(echo {{ onion_pages }} | tr -d '[]\",') \""
         docker exec target bash -c "screen -S torpedo_os_capture -X colon \"logfile flush 0^M\""
-      tags: 
+      tags:
         - launch_capture
         - start_capture
 
-    
+
     #####################################################
     # Post-Experiment tasks
     #####################################################

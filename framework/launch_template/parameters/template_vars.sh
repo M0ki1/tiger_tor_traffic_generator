@@ -13,7 +13,7 @@ template_vars["T_NB_NODES_ONION"]="1"
 template_vars["T_NB_NODES_CLIENT"]="1"
 template_vars["T_CLIENTS_PER_NODE"]="4"
 template_vars["T_ONIONS_PER_NODE"]="4"
-template_vars["T_REQUESTS_PER_CLIENT"]="10000"
+template_vars["T_REQUESTS_PER_CLIENT"]="20"
 
 # escape \n with sed ':a;N;$!ba;s/\n/\\n/g'
 template_vars["T_NODES_CLIENT_REGIONS"]=$(cat $CUR_PATH/launch_template/parameters/NODE_CLIENT_REGIONS | tr -d '\n')

@@ -1,10 +1,5 @@
-FROM debian:buster
-
+FROM debian:bullseye
 LABEL maintainer "opsxcq@strm.sh"
-
-# Add backport to latest version of tor
-RUN echo 'deb http://deb.debian.org/debian buster-backports main' >> /etc/apt/sources.list
-
 # Base packages
 RUN apt-get update && \
     apt-get -y install \
@@ -12,10 +7,9 @@ RUN apt-get update && \
     tcpdump \
     nginx \
     lsof \
-    ntpdate && \
-    apt-get -t buster-backports -y install \
-    tor torsocks
-
+    ntpdate \
+    tor \
+    torsocks
 # Compile shallot
 ADD ./mkp224o-1.5.0 /mkp224o-1.5.0
 RUN apt-get update && \
@@ -31,30 +25,22 @@ RUN apt-get update && \
     rm -Rf /mkp224o-1.5.0 && \
     apt-get -y purge build-essential libssl-dev && \
     rm -Rf /var/lib/apt/lists/*
-
 # Security and permissions
 RUN useradd --system --uid 666 -M --shell /usr/sbin/nologin hidden
-
 # Configure nginx logs to go to Docker log collection (via stdout/stderr)
 RUN ln --symbolic --force /dev/stdout /var/log/nginx/access.log
 RUN ln --symbolic --force /dev/stderr /var/log/nginx/error.log
-
 # Main script
 ADD ./main.sh /main.sh
 ADD ./generate.sh /generate.sh
 ADD ./serve.sh /serve.sh
-
 # Tor Config
 ADD ./torrc /etc/tor/torrc
-
-# Add nginx default configuration 
+# Add nginx default configuration
 ADD ./nginx.conf /etc/nginx/nginx.conf
-
 # Configuration files and data output folder
 VOLUME /web2
 WORKDIR /web2
-
 ENTRYPOINT ["/main.sh"]
 #CMD ["serve"]
 CMD ["torp"]
-

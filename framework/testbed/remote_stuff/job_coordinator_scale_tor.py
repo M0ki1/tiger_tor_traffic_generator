@@ -55,6 +55,12 @@ def run_experiment():
     sub.call("ansible-playbook run_collection.yml  --tags \"bridge_line\"", shell=True)
 
 
+    ## Run the experiment
+    print("[*] Running experiment...")
+
+    sub.call("ansible-playbook run_collection.yml  --tags \"run_exp\"", shell=True)
+
+
     # copy the dataset directly into gasolina
 
     # print("[*] Fetching onion experiment results...")
@@ -67,8 +73,8 @@ def run_experiment():
     # sub.call("ansible-playbook run_collection.yml  --tags \"fetch_pcaps_client\"", shell=True)
 
 
-    #print("[*] Fetching experiment results...")
-    #sub.call("ansible-playbook run_collection.yml  --tags \"fetch_all_pcaps\"", shell=True)
+    print("[*] Fetching experiment results...")
+    sub.call("ansible-playbook run_collection.yml  --tags \"fetch_all_pcaps\"", shell=True)
 
     #print("[*] Cleanup experiment results...")
     #sub.call("ansible-playbook run_collection.yml  --tags \"rm_pcaps\"", shell=True)
