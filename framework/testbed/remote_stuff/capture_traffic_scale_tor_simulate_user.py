@@ -47,6 +47,8 @@ def stop_capture_all():
         os.system(f'docker exec torp-onion-service-{i} sh -c "pkill tcpdump"')
 
 
+# TODO Define capture_traffic to rune in here, its making that all colapsesMOKI
+
 @app.route('/startTrafficCapture', methods=['POST'])
 def start_traffic_capture():
     capture_folder, onion_idx, sample_name = str(request.data.decode("utf-8")).split(",")

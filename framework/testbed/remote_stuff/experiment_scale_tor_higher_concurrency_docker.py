@@ -8,6 +8,8 @@ import random
 from flask import Flask
 from flask import request
 
+## TODO : USE THIS AS INSP FOR THE TOR_SIMULATE USER MOKI
+ 
 
 # TODO: this is not finished! Still needs lots of changes to work with docker
 logging.disable(logging.DEBUG)

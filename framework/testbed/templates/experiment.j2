@@ -56,7 +56,7 @@ sleep 10s
 
 for i in $(seq {{ clients_per_node }})
 do
-  docker exec tor_client$i wait
+  # docker exec tor_client$i wait
   while [ ! -f client${i}_is_done ]
   do
     sleep 1s

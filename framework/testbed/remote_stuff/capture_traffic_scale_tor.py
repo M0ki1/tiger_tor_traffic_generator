@@ -12,7 +12,7 @@ import http.server
 import socketserver
 import threading
 
-
+## TODO : USE THIS AS INSP FOR THE TOR_SIMULATE USER MOKI
 logging.basicConfig(filename = 'file.log',level=logging.DEBUG,format='%(asctime)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S')
 
 HTTP_PORT = 8001
@@ -84,6 +84,7 @@ if __name__ == "__main__":
 
     # docker kill $(docker ps -q)
     ### TODO: with this approach only ansible is allowed to start new dockers 
+    ### I really dont like this
 
     capture_traffic('pcap-folder/full-onion/', hostname + '_' + page)
 
